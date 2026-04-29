@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A+B ⇌ P+Q: ΔG vs. Time</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #ffffff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    margin: 0;
+  }
+  canvas { background: #fff; display: block; }
+  #controls {
+    margin-top: 14px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  button {
+    padding: 7px 18px;
+    font-size: 0.95em;
+    border-radius: 4px;
+    border: 1px solid #888;
+    cursor: pointer;
+    background: #f0f0f0;
+  }
+  button:hover { background: #dde; }
+  select { font-size: 0.9em; padding: 5px; border-radius: 4px; }
+  #phase-box {
+    margin-top: 10px;
+    min-height: 44px;
+    width: 680px;
+    background: #f7f7f7;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 8px 14px;
+    font-size: 0.93em;
+    color: #333;
+    box-sizing: border-box;
+  }
+  #legend {
+    margin-top: 8px;
+    font-size: 0.85em;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+  }
+  .li { display:inline-flex; align-items:center; gap:6px; }
+  .ll { display:inline-block; width:28px; height:3px; border-radius:2px; }
+</style>
+</head>
+<body>
+
+<canvas id="myCanvas" width="680" height="420"></canvas>
+
+<div id="legend">
+  <span class="li"><span class="ll" style="background:#333"></span>Equilibrium (ΔG = 0)</span>
+  <span class="li"><span class="ll" style="background:#4472C4"></span>Forward: A+B added &#8594; G &lt; 0</span>
+  <span class="li"><span class="ll" style="background:#FF0000"></span>Reverse: P+Q added &#8594; G &gt; 0</span>
+</div>
+
+<div id="controls">
+  <button id="playBtn">&#9654; Play</button>
+  <button id="resetBtn">&#8635; Reset</button>
+  <span style="font-size:0.9em;color:#444">Speed:</span>
+  <select id="speedSel">
+    <option value="0.1">0.1&times;</option>
+    <option value="0.2">0.2&times;</option>
+    <option value="0.3">0.3&times;</option>
+    <option value="0.4">0.4&times;</option>
+    <option value="0.5">0.5&times;</option>
+    <option value="0.6">0.6&times;</option>
+    <option value="0.7">0.7&times;</option>
+    <option value="0.8">0.8&times;</option>
+    <option value="0.9">0.9&times;</option>
+    <option value="1" selected>1&times;</option>
+  </select>
+</div>
+
+<div id="phase-box">Press <b>Play</b> to start the animation.</div>
+
+<script>
+// ── SEGMENTS ─────────────────────────────────────────────────────────────────
+// Each segment has a color and array of [t, G] pairs
+var SEGS = [
+  { color:'#333333', pts:[[0,0],[1,0],[2,0],[3,0],[4,0],[5,0],[5.1,0],[5.2,0],[5.3,0],[5.4,0],[5.5,0],[5.6,0],[5.7,0],[5.8,0],[5.9,0]] },
+  { color:'#4472C4', pts:[[5.9,0],[6.0,-10]] },
+  { color:'#4472C4', pts:[[6,-10],[7,-6.7032],[8,-3.6788],[9,-2.2313],[10,-1.3534],[11,-0.8208],[12,-0.4979],[13,-0.3020],[14,-0.1832],[15,-0.1111],[16,-0.0674],[17,-0.0409],[18,-0.0248],[19,-0.0150],[20,-0.0091],[21,-0.0055],[22,-0.0034],[23,-0.0020],[24,-0.0012],[25,-0.0007]] },
+  { color:'#333333', pts:[[25.1,0],[25.2,0],[25.3,0],[25.4,0],[25.5,0],[25.6,0],[25.7,0],[25.8,0],[25.9,0]] },
+  { color:'#FF0000', pts:[[25.9,0],[26.0,10]] },
+  { color:'#FF0000', pts:[[26,10],[27,6.7032],[28,4.4933],[29,3.0119],[30,2.0190],[31,1.3534],[32,0.9072],[33,0.6081],[34,0.4076],[35,0.2732],[36,0.1832],[37,0.1228],[38,0.0823],[39,0.0552],[40,0.0370],[41,0.0248],[42,0.0166],[43,0.0111],[44,0.0075],[45,0.0050],[46,0.0034],[47,0.0022],[48,0.0015],[49,0.0010],[50,0.0007]] }
+];
+
+// Flatten all points with segment index for dot tracking
+var ALL = [];
+for (var si = 0; si < SEGS.length; si++) {
+  for (var pi = 0; pi < SEGS[si].pts.length; pi++) {
+    ALL.push({ t: SEGS[si].pts[pi][0], g: SEGS[si].pts[pi][1], si: si });
+  }
+}
+var TOTAL = ALL.length;
+
+// ── LAYOUT ───────────────────────────────────────────────────────────────────
+var canvas = document.getElementById('myCanvas');
+var ctx    = canvas.getContext('2d');
+var W = canvas.width, H = canvas.height;
+var PL=65, PR=24, PT=36, PB=52;
+var PW = W-PL-PR, PH = H-PT-PB;
+
+function cx(t) { return PL + (t/50)*PW; }
+function cy(g) { return PT + ((12-g)/24)*PH; }
+
+// ── DRAW STATIC ELEMENTS ─────────────────────────────────────────────────────
+function drawStatic() {
+  ctx.clearRect(0,0,W,H);
+
+  // Grid
+  ctx.strokeStyle = '#e0e0e0'; ctx.lineWidth = 1;
+  var g, t;
+  for (g=-10; g<=10; g+=2) {
+    ctx.beginPath(); ctx.moveTo(PL,cy(g)); ctx.lineTo(W-PR,cy(g)); ctx.stroke();
+  }
+  for (t=0; t<=50; t+=5) {
+    ctx.beginPath(); ctx.moveTo(cx(t),PT); ctx.lineTo(cx(t),H-PB); ctx.stroke();
+  }
+
+  // Dashed zero line
+  ctx.strokeStyle='#aaa'; ctx.lineWidth=1; ctx.setLineDash([4,3]);
+  ctx.beginPath(); ctx.moveTo(PL,cy(0)); ctx.lineTo(W-PR,cy(0)); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Axes
+  ctx.strokeStyle='#333'; ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.moveTo(PL,PT); ctx.lineTo(PL,H-PB); ctx.lineTo(W-PR,H-PB);
+  ctx.stroke();
+
+  // Y labels
+  ctx.fillStyle='#333'; ctx.textAlign='right'; ctx.font='12px Arial';
+  for (g=-10; g<=10; g+=2) ctx.fillText(g, PL-8, cy(g)+4);
+
+  // X labels
+  ctx.textAlign='center'; ctx.font='12px Arial';
+  for (t=0; t<=50; t+=5) ctx.fillText(t, cx(t), H-PB+18);
+
+  // Y axis title
+  ctx.save();
+  ctx.translate(13, PT+PH/2); ctx.rotate(-Math.PI/2);
+  ctx.textAlign='center'; ctx.font='bold 13px Arial'; ctx.fillStyle='#222';
+  ctx.fillText('ΔG  (kJ/mol)', 0, 0);
+  ctx.restore();
+
+  // X axis title
+  ctx.textAlign='center'; ctx.font='bold 13px Arial'; ctx.fillStyle='#222';
+  ctx.fillText('Time', PL+PW/2, H-6);
+
+  // Chart title
+  ctx.font='bold 15px Arial'; ctx.fillStyle='#111';
+  ctx.fillText('\u0394G vs. Time:  A+B \u21cc P+Q', PL+PW/2, 22);
+}
+
+// ── DRAW CURVES up to frameIdx points ────────────────────────────────────────
+function drawCurves(upTo) {
+  var globalIdx = 0;
+  for (var si = 0; si < SEGS.length; si++) {
+    var seg  = SEGS[si];
+    var nPts = seg.pts.length;
+    var segStart = globalIdx;
+
+    if (segStart >= upTo) break;           // not reached yet
+    var drawCount = Math.min(upTo - segStart, nPts);
+    if (drawCount < 2) { globalIdx += nPts; continue; }
+
+    ctx.beginPath();
+    ctx.moveTo(cx(seg.pts[0][0]), cy(seg.pts[0][1]));
+    for (var k = 1; k < drawCount; k++) {
+      ctx.lineTo(cx(seg.pts[k][0]), cy(seg.pts[k][1]));
+    }
+    ctx.strokeStyle = seg.color;
+    ctx.lineWidth   = 2.5;
+    ctx.lineJoin    = 'round';
+    ctx.lineCap     = 'round';
+    ctx.stroke();
+
+    globalIdx += nPts;
+  }
+}
+
+// ── MOVING DOT ───────────────────────────────────────────────────────────────
+function drawDot(upTo) {
+  if (upTo < 1) return;
+  var p = ALL[Math.min(upTo-1, TOTAL-1)];
+  ctx.beginPath();
+  ctx.arc(cx(p.t), cy(p.g), 5, 0, 2*Math.PI);
+  ctx.fillStyle   = SEGS[p.si].color;
+  ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+// ── ANNOTATIONS ──────────────────────────────────────────────────────────────
+var ANNS = [
+  { minT: 0,   at:  2.5, ag:  1.7,  text:'System at equilibrium',       color:'#555' },
+  { minT: 6,   at:  6.5, ag:-11.0,  text:'A+B added \u2192 ΔG < 0',      color:'#4472C4' },
+  { minT: 14,  at: 16,   ag: -2.2,  text:'\u0394G \u2192 0 (new equilibrium)',  color:'#4472C4' },
+  { minT: 26,  at: 26.5, ag: 11.0,  text:'P+Q added \u2192 ΔG > 0',      color:'#CC0000' },
+  { minT: 38,  at: 38,   ag:  2.5,  text:'\u0394G \u2192 0 (re-equilibrates)', color:'#CC0000' },
+];
+
+function drawAnnotations(upTo) {
+  var curT = upTo > 0 ? ALL[Math.min(upTo-1,TOTAL-1)].t : -1;
+  ctx.font='11px Arial';
+  for (var i=0; i<ANNS.length; i++) {
+    if (curT >= ANNS[i].minT) {
+      ctx.fillStyle=ANNS[i].color; ctx.textAlign='center';
+      ctx.fillText(ANNS[i].text, cx(ANNS[i].at), cy(ANNS[i].ag));
+    }
+  }
+}
+
+// ── PHASE TEXT ────────────────────────────────────────────────────────────────
+function phaseText(upTo) {
+  var t = upTo > 0 ? ALL[Math.min(upTo-1,TOTAL-1)].t : -1;
+  if (t < 0)    return 'Press <b>Play</b> to start the animation.';
+  if (t < 5.95) return '&#9878; <b>Phase 1:</b> System is at equilibrium &mdash; Gibbs free energy ΔG&nbsp;=&nbsp;0. No net reaction occurs.';
+  if (t < 6.05) return '&darr; <b>Phase 2:</b> Reactants A and B are added. ΔG drops sharply below zero &mdash; the forward reaction A+B &rarr; P+Q is now spontaneous.';
+  if (t < 25.0) return '&nearr; <b>Phase 3:</b> The forward reaction proceeds, consuming A+B and producing P+Q. ΔG rises back toward zero as a new equilibrium is approached.';
+  if (t < 25.95)return '&#9878; <b>Phase 4:</b> ΔG has returned to zero &mdash; the system is at equilibrium once more.';
+  if (t < 26.05)return '&uarr; <b>Phase 5:</b> Products P and Q are added. ΔG jumps above zero &mdash; the reverse reaction P+Q &rarr; A+B is now spontaneous.';
+  return '&searr; <b>Phase 6:</b> The reverse reaction proceeds, consuming P+Q and regenerating A+B. ΔG falls back toward zero as equilibrium is restored.';
+}
+
+// ── ANIMATION ─────────────────────────────────────────────────────────────────
+var frameIdx = 0;
+var playing  = false;
+var animId   = null;
+var lastTS   = null;
+var fracAcc  = 0;
+var PTS_PER_SEC = 10;
+
+function fullRender() {
+  drawStatic();
+  drawCurves(frameIdx);
+  drawAnnotations(frameIdx);
+  drawDot(frameIdx);
+  document.getElementById('phase-box').innerHTML = phaseText(frameIdx);
+}
+
+function step(ts) {
+  if (!lastTS) lastTS = ts;
+  var speed = parseFloat(document.getElementById('speedSel').value);
+  var dt    = (ts - lastTS) / 1000;
+  lastTS    = ts;
+
+  fracAcc += dt * PTS_PER_SEC * speed;
+  var add   = Math.floor(fracAcc);
+  fracAcc  -= add;
+  frameIdx  = Math.min(frameIdx + add, TOTAL);
+
+  fullRender();
+
+  if (frameIdx < TOTAL) {
+    animId = requestAnimationFrame(step);
+  } else {
+    playing = false;
+    document.getElementById('playBtn').innerHTML = '&#9654; Play';
+  }
+}
+
+document.getElementById('playBtn').addEventListener('click', function() {
+  if (playing) {
+    cancelAnimationFrame(animId);
+    playing = false; lastTS = null;
+    this.innerHTML = '&#9654; Play';
+  } else {
+    if (frameIdx >= TOTAL) frameIdx = 0;
+    playing = true; lastTS = null;
+    this.innerHTML = '&#9646;&#9646; Pause';
+    animId = requestAnimationFrame(step);
+  }
+});
+
+document.getElementById('resetBtn').addEventListener('click', function() {
+  cancelAnimationFrame(animId);
+  playing = false; lastTS = null; frameIdx = 0; fracAcc = 0;
+  document.getElementById('playBtn').innerHTML = '&#9654; Play';
+  document.getElementById('phase-box').innerHTML = 'Press <b>Play</b> to start the animation.';
+  fullRender();
+});
+
+fullRender();
+</script>
+</body>
+</html>
